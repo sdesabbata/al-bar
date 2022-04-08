@@ -1,0 +1,109 @@
+---
+title: "A spatial analysis of Italian cafes names"
+author: "Stefano De Sabbata"
+date: "`r lubridate::now()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Aims
+
+Work in progress! :sweat_smile:
+
+The aim is to replicate the work presented by Chris Brunsdon, Paul Harris and Lex Comber at [GIRSRUK 2022](http://liverpool.gisruk.org/), in the paper [*"A Spatial Analysis of British Public House Names"*](https://doi.org/10.5281/zenodo.6410180).
+
+## Preparation
+
+### Libraris
+
+```{r libraries, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(magrittr)
+library(knitr)
+library(sf)
+library(tmap)
+#library(ggmap)
+library(leaflet)
+library(tidytext)
+```
+
+### Data
+
+This analysis uses OpenStreetMap open data, licensed under the Open Data Commons Open Database License (ODbL) 
+by the OpenStreetMap Foundation (OSMF) © OpenStreetMap contributors.
+
+```{r data}
+cafes_Italy <- read_sf("../data/cafes-Italy-2022-04-07-16-17-16.geojson")
+```
+
+### Overview map
+
+```{r}
+tm_shape(cafes_Italy) + 
+  tm_dots(col = "red") +
+  tm_credits("© OpenStreetMap contributors")
+```
+
+
+## Text content overview
+
+```{r}
+cafes_Italy %>% 
+  st_drop_geometry() %>% 
+  filter(!is.na(name)) %>% 
+  unnest_tokens(word, name) %>% 
+  count(word, sort = TRUE) %>% 
+  slice_max(order_by = n, n = 100) %>% 
+  kable()
+```
+
+## Term-specific maps
+
+*"centrale"*
+
+```{r}
+leaflet(
+    cafes_Italy %>% 
+    filter(
+      name %>% 
+        str_to_lower() %>% 
+        str_detect("centrale")
+    )
+  ) %>%
+  addTiles() %>%
+  addProviderTiles(providers$Stamen.Toner) %>% 
+  addCircleMarkers(
+    radius = 5,
+    color = "red",
+    popup = ~as.character(name), 
+    label = ~as.character(name)
+  )
+```
+
+*"osteria"*
+
+```{r}
+leaflet(
+    cafes_Italy %>% 
+    filter(
+      name %>% 
+        str_to_lower() %>% 
+        str_detect("osteria")
+    )
+  ) %>%
+  addTiles() %>%
+  addProviderTiles(providers$Stamen.Toner) %>% 
+  addCircleMarkers(
+    radius = 5,
+    color = "red",
+    popup = ~as.character(name), 
+    label = ~as.character(name)
+  )
+```
+
+## References
+
+Brunsdon, Chris, Harris, Paul, & Comber, Alexis. (2022, March 30). A Spatial Analysis of British Public House Names. 30th Annual Geographical Information Science Research UK (GISRUK), Liverpool, United Kingdom. [https://doi.org/10.5281/zenodo.6410180](https://doi.org/10.5281/zenodo.6410180)
