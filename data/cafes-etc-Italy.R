@@ -1,4 +1,4 @@
-# This scripts downloads all the points and polygons in Italy for OpenStreetMap
+# This script downloads all the points and polygons in Italy for OpenStreetMap
 # and generates a dataset containing all the cafes.
 # 
 # OpenStreetMap® is open data, licensed under the Open Data Commons Open Database License (ODbL) 
@@ -12,6 +12,7 @@
 # the osmextract GitHub repo
 # the https://github.com/ropensci/osmextract
 
+# bakery, chocolate, ice-cream
 
 # Libraries ---------------------------------------------------------------
 
