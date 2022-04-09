@@ -1,0 +1,304 @@
+---
+title: "Exploratory analysis of Italian cafes names"
+author: "Stefano De Sabbata"
+date: "`r lubridate::now()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Aims
+
+Work in progress! :sweat_smile:
+
+The aim is to conduct an analysis similar to the work presented by Chris Brunsdon, Paul Harris and Lex Comber at [GIRSRUK 2022](http://liverpool.gisruk.org/), in the paper [*"A Spatial Analysis of British Public House Names"*](https://doi.org/10.5281/zenodo.6410180), but focusing on *Italian "cafes"*. However, for a number of cultural and historical reasons, *Italian "cafes"* can be understood and encoded in OpenStreetMap (the data source for this project) as: `amenity => cafe`, `amenity => bar`, `shop => bakery`, `shop => confectionery`, `shop => chocolate`, `amenity => ice_cream` or `shop => ice_cream`. This will definitely need to be discussed here at some point -- likely, this has already been discussed somewhere else.
+
+
+## Preparation
+
+### Libraris
+
+```{r libraries, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(magrittr)
+library(knitr)
+library(sf)
+library(tmap)
+#library(ggmap)
+library(leaflet)
+library(tidytext)
+```
+
+### Data
+
+This analysis uses OpenStreetMap open data, licensed under the Open Data Commons Open Database License (ODbL) 
+by the OpenStreetMap Foundation (OSMF) © OpenStreetMap contributors.
+
+```{r data}
+barcafes_Italy <- read_sf("../data/bar-cafe-etc-Italy-2022-04-09-19-36-39.geojson")
+```
+
+### Overview map
+
+```{r, fig.height=6.5, fig.width=5}
+tm_shape(barcafes_Italy) + 
+  tm_dots("osm_type", size= 0.01, alpha = 0.5, palette = "Set1") +
+  tm_credits("© OpenStreetMap contributors")
+```
+
+
+## Text content overview
+
+```{r}
+stop_words_it <- tibble(
+  word = stopwords::stopwords("it", source = "snowball"),
+  lexicon = "snowball"
+)
+```
+
+```{r}
+barcafes_Italy_name_tokens <-
+  barcafes_Italy %>% 
+  st_drop_geometry() %>% 
+  filter(!is.na(name)) %>% 
+  unnest_tokens(word, name)
+```
+
+Most common words in *Italian "cafes"* names.
+
+```{r}
+barcafes_Italy_name_tokens %>% 
+  anti_join(stop_words_it) %>% 
+  count(word, sort = TRUE) %>% 
+  slice_max(order_by = n, n = 100) %>% 
+  kable()
+```
+
+## Name components' odds ratio
+
+In order to explore how specific to each area a part of a name is, I start by following the approach used by Shelton et al. (2014), calculating the odd-ratio (or location quotient) for each word and area, unsing a 10km hexagonal grid.
+
+```{r}
+hex_gird <- read_sf("../data/hexagonal_grid_10km_Italy.geojson")
+```
+
+```{r}
+barcafes_Italy_with_hex <-
+  barcafes_Italy %>% 
+  st_join(hex_gird)
+```
+
+```{r}
+barcafes_Italy_with_hex_tokens <-
+  barcafes_Italy_with_hex %>% 
+  st_drop_geometry() %>% 
+  filter(!is.na(name)) %>% 
+  unnest_tokens(word, name) %>% 
+  anti_join(stop_words_it) %>% 
+  count(hex_id, word, sort = TRUE) %>%
+  complete(hex_id, word, fill = list(n = 0))
+
+sum_hex <- barcafes_Italy_with_hex_tokens %>% count(hex_id, wt = n) %>% rename(sum_hex = n)
+sum_word <- barcafes_Italy_with_hex_tokens %>% count(word, wt = n) %>% rename(sum_word = n)
+sum_all_value <- barcafes_Italy_with_hex_tokens %>% count(wt = n) %>% pull(n)
+
+barcafes_Italy_with_hex_oddratios <-
+  barcafes_Italy_with_hex_tokens %>% 
+  left_join(sum_hex) %>% 
+  left_join(sum_word) %>% 
+  mutate(sum_all = sum_all_value) %>% 
+  mutate(
+    oddratio = ((n / sum_word) / (sum_hex / sum_all))
+  ) %>% 
+  mutate(
+    oddratio_lower = 
+      exp(
+        log(oddratio) - 
+          (3.29 * sqrt(
+            (1/n) + (1/sum_word) + (1/sum_hex) + (1/sum_all)
+          ))
+      )
+  )
+```
+
+Odds ratio base descriptive statistics for top name components.
+
+```{r}
+barcafes_Italy_name_tokens %>% 
+  anti_join(stop_words_it) %>% 
+  count(word, sort = TRUE) %>% 
+  slice_max(order_by = n, n = 100) %>% 
+  left_join(
+    barcafes_Italy_with_hex_oddratios %>% 
+      group_by(word) %>% 
+      summarise(
+        oddratio_min = min(oddratio),
+        oddratio_mean = mean(oddratio),
+        oddratio_median = median(oddratio),
+        oddratio_max = max(oddratio),
+        oddratio_sd = sd(oddratio)
+      )
+  ) %>% 
+  kable()
+```
+
+
+## Term-specific maps
+
+### Pasticceria
+
+```{r}
+leaflet(
+    barcafes_Italy %>% 
+    filter(
+      name %>% 
+        str_to_lower() %>% 
+        str_detect("pasticceria")
+    )
+  ) %>%
+  addTiles() %>%
+  addProviderTiles(providers$Stamen.Toner) %>% 
+  addCircleMarkers(
+    radius = 5,
+    color = "red",
+    popup = ~as.character(name), 
+    label = ~as.character(name)
+  )
+```
+
+```{r}
+# tm_shape(boundary_Italy) + 
+#   tm_borders() +
+tm_shape(
+    hex_gird %>% 
+      inner_join(
+        barcafes_Italy_with_hex_oddratios %>% 
+          filter(word == "pasticceria")
+      )
+  ) +
+  tm_fill(
+    "oddratio_lower", 
+    showNA = FALSE, palette = "YlOrRd", n=9, style = "jenks"
+  )
+```
+
+# Pane
+
+```{r}
+leaflet(
+    barcafes_Italy %>% 
+    filter(
+      name %>% 
+        str_to_lower() %>% 
+        str_detect("pane")
+    )
+  ) %>%
+  addTiles() %>%
+  addProviderTiles(providers$Stamen.Toner) %>% 
+  addCircleMarkers(
+    radius = 5,
+    color = "red",
+    popup = ~as.character(name), 
+    label = ~as.character(name)
+  )
+```
+
+```{r}
+# tm_shape(boundary_Italy) + 
+#   tm_borders() +
+tm_shape(
+    hex_gird %>% 
+      inner_join(
+        barcafes_Italy_with_hex_oddratios %>% 
+          filter(word == "pane")
+      )
+  ) +
+  tm_fill(
+    "oddratio_lower", 
+    showNA = FALSE, palette = "YlOrRd", n=9, style = "jenks"
+  )
+```
+
+### Forno
+
+```{r}
+leaflet(
+    barcafes_Italy %>% 
+    filter(
+      name %>% 
+        str_to_lower() %>% 
+        str_detect("forno")
+    )
+  ) %>%
+  addTiles() %>%
+  addProviderTiles(providers$Stamen.Toner) %>% 
+  addCircleMarkers(
+    radius = 5,
+    color = "red",
+    popup = ~as.character(name), 
+    label = ~as.character(name)
+  )
+```
+
+```{r}
+# tm_shape(boundary_Italy) + 
+#   tm_borders() +
+tm_shape(
+    hex_gird %>% 
+      inner_join(
+        barcafes_Italy_with_hex_oddratios %>% 
+          filter(word == "forno")
+      )
+  ) +
+  tm_fill(
+    "oddratio_lower", 
+    showNA = FALSE, palette = "YlOrRd", n=9, style = "jenks"
+  )
+```
+
+### Centrale
+
+```{r}
+leaflet(
+    barcafes_Italy %>% 
+    filter(
+      name %>% 
+        str_to_lower() %>% 
+        str_detect("centrale")
+    )
+  ) %>%
+  addTiles() %>%
+  addProviderTiles(providers$Stamen.Toner) %>% 
+  addCircleMarkers(
+    radius = 5,
+    color = "red",
+    popup = ~as.character(name), 
+    label = ~as.character(name)
+  )
+```
+
+```{r}
+# tm_shape(boundary_Italy) + 
+#   tm_borders() +
+tm_shape(
+    hex_gird %>% 
+      inner_join(
+        barcafes_Italy_with_hex_oddratios %>% 
+          filter(word == "centrale")
+      )
+  ) +
+  tm_fill(
+    "oddratio_lower", 
+    showNA = FALSE, palette = "YlOrRd", n=9, style = "jenks"
+  )
+```
+
+
+
+## References
+
+Brunsdon, Chris, Harris, Paul, & Comber, Alexis. (2022, March 30). A Spatial Analysis of British Public House Names. 30th Annual Geographical Information Science Research UK (GISRUK), Liverpool, United Kingdom. [https://doi.org/10.5281/zenodo.6410180](https://doi.org/10.5281/zenodo.6410180)
+
+Shelton, T., Poorthuis, A., Graham, M., & Zook, M. (2014). Mapping the data shadows of Hurricane Sandy: Uncovering the sociospatial dimensions of ‘big data’. Geoforum, 52, 167-179. [https://doi.org/10.1016/j.geoforum.2014.01.006](https://doi.org/10.1016/j.geoforum.2014.01.006)
